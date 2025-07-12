@@ -1,13 +1,21 @@
 from docxtpl import DocxTemplate
-from docx import Document
 from datetime import datetime
-from docx.shared import Pt
-from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import io
 import uvicorn
-from fpdf import FPDF
+import subprocess
+import os
+
+def convert_docx_to_pdf(docx_path, output_dir):
+    subprocess.run([
+        "libreoffice",  # или "libreoffice" в Linux
+        "--headless",
+        "--convert-to", "pdf",
+        "--outdir", output_dir,
+        docx_path
+    ], check=True)
 
 app = FastAPI()
 app.add_middleware(
@@ -30,37 +38,7 @@ def fill_contract_jinja(data):
     doc = DocxTemplate('template.docx')
     doc.render(context)
     output_stream = io.BytesIO()
-    doc.save(output_stream)
-    output_stream.seek(0)
-    pdf_stream = convert_docx_bytesio_to_pdf_bytesio(output_stream)
-    return pdf_stream
-
-def docx_stream_to_code_text(docx_stream: io.BytesIO) -> str:
-    docx_stream.seek(0)
-    document = Document(docx_stream)
-    code_lines = [para.text for para in document.paragraphs]
-    return '\n'.join(code_lines)
-
-def code_text_to_pdf(code_text: str) -> io.BytesIO:
-    pdf_stream = io.BytesIO()
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-    pdf.add_font('microsoftsansserif', '', 'microsoftsansserif.ttf', uni=True)
-    pdf.set_font("microsoftsansserif", size=10)
-
-    for line in code_text.split('\n'):
-        pdf.multi_cell(0, 5, line)
-
-    pdf_bytes = pdf.output(dest='S').encode('utf-8')  # 'S' = return as string
-    pdf_stream = io.BytesIO(pdf_bytes)
-    pdf_stream.seek(0)
-    return pdf_stream
-
-# Пример: docx → pdf через BytesIO
-def convert_docx_bytesio_to_pdf_bytesio(docx_stream: io.BytesIO) -> io.BytesIO:
-    code_text = docx_stream_to_code_text(docx_stream)
-    return code_text_to_pdf(code_text)
+    doc.save('output.docx')
 
 
 @app.post("/fill_template")
@@ -68,11 +46,14 @@ async def fill_template(
     data = Body(...)
 ):
     try:
-        output_stream = fill_contract_jinja(data)
+        fill_contract_jinja(data)
+        convert_docx_to_pdf('output.docx', ".")
+        file_path = "output.pdf"  # путь к вашему PDF
+        file_like = open(file_path, mode="rb")
         return StreamingResponse(
-            output_stream,
+            file_like,
             media_type="application/pdf",
-            headers={"Content-Disposition": "attachment; filename=output.pdf"}
+            headers={"Content-Disposition": "attachment; filename=contract.pdf"}
         )
     
     except Exception as e:
